@@ -1,0 +1,100 @@
+#!/usr/bin/env python3
+
+import json
+import subprocess
+import sys
+
+SYSTEM_PROMPT = "Generate 1-3 shell command options for macOS/zsh. Assume current directory."
+
+SCHEMA = json.dumps({
+    "type": "object",
+    "properties": {
+        "options": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "label": {"type": "string"},
+                    "command": {"type": "string"},
+                },
+                "required": ["label", "command"],
+            },
+        }
+    },
+    "required": ["options"],
+})
+
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: ccom <description>", file=sys.stderr)
+        sys.exit(1)
+
+    prompt = " ".join(sys.argv[1:])
+
+    result = subprocess.run(
+        [
+            "claude",
+            "--model", "haiku",
+            "-p",
+            "--tools", "",
+            "--output-format", "json",
+            "--json-schema", SCHEMA,
+            "--system-prompt", SYSTEM_PROMPT,
+            "--no-session-persistence",
+            "--setting-sources", "",
+            prompt,
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    if result.returncode != 0:
+        print(f"Error: {result.stderr}", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        messages = json.loads(result.stdout)
+        cmds = messages[-1].get("structured_output", {}).get("options", [])
+    except (json.JSONDecodeError, IndexError, KeyError):
+        print(f"Parse error: {result.stdout}", file=sys.stderr)
+        sys.exit(1)
+
+    if not cmds:
+        print("No commands generated", file=sys.stderr)
+        sys.exit(1)
+
+    # ANSI codes (only if TTY)
+    if sys.stdout.isatty():
+        BOLD = "\033[1m"
+        DIM = "\033[2m"
+        CYAN = "\033[36m"
+        YELLOW = "\033[33m"
+        GREEN = "\033[32m"
+        RESET = "\033[0m"
+    else:
+        BOLD = DIM = CYAN = YELLOW = GREEN = RESET = ""
+
+    print(f"\n{DIM}─────────────────────────────{RESET}")
+    print(f"  {BOLD}Claude Command{RESET} {DIM}v1.0{RESET}")
+    print(f"{DIM}─────────────────────────────{RESET}\n")
+
+    for i, opt in enumerate(cmds, 1):
+        num = f"{CYAN}{BOLD}[{i}]{RESET}"
+        label = f"{DIM}{opt['label']}{RESET}"
+        cmd = f"{YELLOW}{opt['command']}{RESET}"
+        print(f"  {num} {label}")
+        print(f"      {cmd}")
+        print()
+
+    choice = input(f"{GREEN}▶{RESET} Run {CYAN}[1-{len(cmds)}]{RESET} or {DIM}q{RESET}: ").strip().lower()
+    if choice == "q":
+        sys.exit(0)
+    if choice.isdigit() and 1 <= int(choice) <= len(cmds):
+        cmd = cmds[int(choice) - 1]["command"]
+        print(f"\n{DIM}${RESET} {BOLD}{cmd}{RESET}\n")
+        subprocess.run(cmd, shell=True)
+
+
+if __name__ == "__main__":
+    main()
