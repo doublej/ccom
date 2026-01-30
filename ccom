@@ -1,8 +1,16 @@
 #!/usr/bin/env python3
 
+import argparse
+import hashlib
 import json
 import subprocess
 import sys
+import time
+from pathlib import Path
+
+DATA_DIR = Path.home() / ".ccom"
+CACHE_FILE = DATA_DIR / "cache.json"
+HISTORY_FILE = DATA_DIR / "history.jsonl"
 
 SYSTEM_PROMPT = "Generate 1-3 shell command options for macOS/zsh. Assume current directory."
 
@@ -25,13 +33,35 @@ SCHEMA = json.dumps({
 })
 
 
-def main():
-    if len(sys.argv) < 2:
-        print("Usage: ccom <description>", file=sys.stderr)
-        sys.exit(1)
+def get_cache_key(prompt: str) -> str:
+    return hashlib.md5(prompt.strip().lower().encode()).hexdigest()
 
-    prompt = " ".join(sys.argv[1:])
 
+def load_cache() -> dict:
+    if CACHE_FILE.exists():
+        return json.loads(CACHE_FILE.read_text())
+    return {}
+
+
+def save_cache(cache: dict) -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    CACHE_FILE.write_text(json.dumps(cache, indent=2))
+
+
+def log_history(prompt: str, options: list, chosen: int, cmd: str) -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    entry = {
+        "ts": int(time.time()),
+        "prompt": prompt,
+        "options": options,
+        "chosen": chosen,
+        "cmd": cmd,
+    }
+    with HISTORY_FILE.open("a") as f:
+        f.write(json.dumps(entry) + "\n")
+
+
+def fetch_commands(prompt: str) -> list:
     result = subprocess.run(
         [
             "claude",
@@ -48,17 +78,37 @@ def main():
         capture_output=True,
         text=True,
     )
-
     if result.returncode != 0:
         print(f"Error: {result.stderr}", file=sys.stderr)
         sys.exit(1)
 
     try:
         messages = json.loads(result.stdout)
-        cmds = messages[-1].get("structured_output", {}).get("options", [])
+        return messages[-1].get("structured_output", {}).get("options", [])
     except (json.JSONDecodeError, IndexError, KeyError):
         print(f"Parse error: {result.stdout}", file=sys.stderr)
         sys.exit(1)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Convert natural language to shell commands")
+    parser.add_argument("-f", "--fresh", action="store_true", help="Bypass cache")
+    parser.add_argument("prompt", nargs="+", help="Description of what you want to do")
+    args = parser.parse_args()
+
+    prompt = " ".join(args.prompt)
+    cache_key = get_cache_key(prompt)
+    cache = load_cache()
+    from_cache = False
+
+    if not args.fresh and cache_key in cache:
+        cmds = cache[cache_key]
+        from_cache = True
+    else:
+        cmds = fetch_commands(prompt)
+        if cmds:
+            cache[cache_key] = cmds
+            save_cache(cache)
 
     if not cmds:
         print("No commands generated", file=sys.stderr)
@@ -75,8 +125,9 @@ def main():
     else:
         BOLD = DIM = CYAN = YELLOW = GREEN = RESET = ""
 
+    cache_indicator = f" {DIM}(cached){RESET}" if from_cache else ""
     print(f"\n{DIM}─────────────────────────────{RESET}")
-    print(f"  {BOLD}Claude Command{RESET} {DIM}v1.0{RESET}")
+    print(f"  {BOLD}Claude Command{RESET} {DIM}v1.0{RESET}{cache_indicator}")
     print(f"{DIM}─────────────────────────────{RESET}\n")
 
     for i, opt in enumerate(cmds, 1):
@@ -91,7 +142,9 @@ def main():
     if choice == "q":
         sys.exit(0)
     if choice.isdigit() and 1 <= int(choice) <= len(cmds):
-        cmd = cmds[int(choice) - 1]["command"]
+        chosen_idx = int(choice)
+        cmd = cmds[chosen_idx - 1]["command"]
+        log_history(prompt, cmds, chosen_idx, cmd)
         print(f"\n{DIM}${RESET} {BOLD}{cmd}{RESET}\n")
         subprocess.run(cmd, shell=True)
 

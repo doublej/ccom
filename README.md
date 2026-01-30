@@ -18,7 +18,14 @@ Requires: `claude` CLI installed and authenticated.
 ccom "list all files"
 ccom "find large videos"
 ccom "compress this folder"
+ccom -f "list files"  # bypass cache
 ```
+
+## Features
+
+- **Caching**: Repeated prompts return instant cached results
+- **History**: All commands logged to `~/.ccom/history.jsonl`
+- **Fresh mode**: Use `-f` to bypass cache and get new suggestions
 
 ## Example
 
