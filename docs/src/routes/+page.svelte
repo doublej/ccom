@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { base } from '$app/paths';
+	import TerminalGallery from '$lib/components/TerminalGallery.svelte';
+	import { examples } from '$lib/data/examples';
 
 	const features = [
 		{
@@ -91,35 +93,7 @@
 	<!-- Demo -->
 	<section class="demo">
 		<div class="container">
-			<div class="terminal">
-				<div class="terminal-bar">
-					<span class="dot red"></span>
-					<span class="dot yellow"></span>
-					<span class="dot green"></span>
-					<span class="terminal-title">Terminal</span>
-				</div>
-				<div class="terminal-body">
-					<pre><code><span class="prompt">$</span> ccom "list all files"
-
-<span class="dim">─────────────────────────────</span>
-  <span class="bold">Claude Command</span> <span class="dim">v1.0</span>
-<span class="dim">─────────────────────────────</span>
-
-  <span class="cyan">[1]</span> <span class="dim">List files in current directory</span>
-      <span class="yellow">ls</span>
-
-  <span class="cyan">[2]</span> <span class="dim">List files with details</span>
-      <span class="yellow">ls -lah</span>
-
-  <span class="cyan">[3]</span> <span class="dim">List files recursively</span>
-      <span class="yellow">find . -type f</span>
-
-<span class="green">&#9654;</span> Run <span class="cyan">[1-3]</span> or <span class="dim">q</span>: <span class="cursor">2</span>
-
-<span class="dim">$</span> <span class="bold">ls -lah</span>
-</code></pre>
-				</div>
-			</div>
+			<TerminalGallery {examples} />
 		</div>
 	</section>
 
@@ -348,69 +322,12 @@
 		opacity: 0.85;
 	}
 
-	/* Demo terminal */
+	/* Demo */
 	.demo {
 		padding: 0 0 var(--section-padding);
 		animation: fadeSlideUp 0.5s ease-out 0.3s forwards;
 		opacity: 0;
 	}
-
-	.terminal {
-		max-width: 600px;
-		margin: 0 auto;
-		border-radius: 10px;
-		overflow: hidden;
-		border: 1px solid var(--border);
-		background: #1e1e1e;
-	}
-
-	.terminal-bar {
-		display: flex;
-		align-items: center;
-		gap: 6px;
-		padding: 10px 14px;
-		background: #2d2d2d;
-	}
-
-	.dot {
-		width: 12px;
-		height: 12px;
-		border-radius: 50%;
-	}
-
-	.dot.red { background: #ff5f57; }
-	.dot.yellow { background: #febc2e; }
-	.dot.green { background: #28c840; }
-
-	.terminal-title {
-		flex: 1;
-		text-align: center;
-		color: #888;
-		font-size: 0.8rem;
-		margin-right: 36px;
-	}
-
-	.terminal-body {
-		padding: 16px 20px;
-	}
-
-	.terminal-body pre {
-		margin: 0;
-	}
-
-	.terminal-body code {
-		font-size: 0.85rem;
-		line-height: 1.7;
-		color: #d4d4d4;
-	}
-
-	.terminal-body .prompt { color: #28c840; }
-	.terminal-body .dim { color: #666; }
-	.terminal-body .bold { color: #fff; font-weight: 600; }
-	.terminal-body .cyan { color: #56b6c2; font-weight: 600; }
-	.terminal-body .yellow { color: #e5c07b; }
-	.terminal-body .green { color: #28c840; }
-	.terminal-body .cursor { color: #fff; border-bottom: 2px solid #fff; }
 
 	/* Features */
 	.features {
