@@ -3,16 +3,20 @@
 import argparse
 import hashlib
 import json
+import re
 import subprocess
 import sys
 import time
+import webbrowser
 from pathlib import Path
+from urllib.parse import urlparse
 
 DATA_DIR = Path.home() / ".ccom"
 CACHE_FILE = DATA_DIR / "cache.json"
 HISTORY_FILE = DATA_DIR / "history.jsonl"
 
 SYSTEM_PROMPT = "Generate 1-3 shell command options for macOS/zsh. Assume current directory."
+SYSTEM_PROMPT_WEB = "Search the web first, then generate 1-3 shell command options for macOS/zsh. Assume current directory."
 
 SCHEMA = json.dumps({
     "type": "object",
@@ -61,34 +65,79 @@ def log_history(prompt: str, options: list, chosen: int, cmd: str) -> None:
         f.write(json.dumps(entry) + "\n")
 
 
-def fetch_commands(prompt: str, web: bool = False) -> list:
-    tools = "WebSearch" if web else ""
-    result = subprocess.run(
-        [
-            "claude",
-            "--model", "haiku",
-            "-p",
-            "--tools", tools,
-            "--output-format", "json",
-            "--json-schema", SCHEMA,
-            "--system-prompt", SYSTEM_PROMPT,
-            "--no-session-persistence",
-            "--setting-sources", "",
-            prompt,
-        ],
-        capture_output=True,
-        text=True,
-    )
+def extract_sources(messages: list) -> list:
+    sources = []
+    seen = set()
+    for msg in messages:
+        if msg.get("role") != "user":
+            continue
+        for block in msg.get("content", []):
+            if block.get("type") != "tool_result":
+                continue
+            text = block.get("content", "")
+            if not isinstance(text, str):
+                continue
+            for match in re.findall(r'"url"\s*:\s*"([^"]+)"', text):
+                if match not in seen:
+                    seen.add(match)
+                    title_match = re.search(
+                        rf'"title"\s*:\s*"([^"]*)"[^}}]*"url"\s*:\s*"{re.escape(match)}"'
+                        rf'|"url"\s*:\s*"{re.escape(match)}"[^}}]*"title"\s*:\s*"([^"]*)"',
+                        text,
+                    )
+                    title = ""
+                    if title_match:
+                        title = title_match.group(1) or title_match.group(2) or ""
+                    sources.append({"title": title, "url": match})
+    return sources
+
+
+def fetch_commands(prompt: str, web: bool = False) -> tuple[list, list]:
+    cmd = [
+        "claude",
+        "--model", "haiku",
+        "-p",
+        "--output-format", "json",
+        "--json-schema", SCHEMA,
+        "--system-prompt", SYSTEM_PROMPT_WEB if web else SYSTEM_PROMPT,
+        "--no-session-persistence",
+        "--setting-sources", "",
+    ]
+    if web:
+        cmd += ["--tools", "WebSearch", "--allowedTools", "WebSearch"]
+    cmd += ["--", prompt]
+
+    result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         print(f"Error: {result.stderr}", file=sys.stderr)
         sys.exit(1)
 
     try:
         messages = json.loads(result.stdout)
-        return messages[-1].get("structured_output", {}).get("options", [])
+        options = messages[-1].get("structured_output", {}).get("options", [])
+        sources = extract_sources(messages) if web else []
+        return options, sources
     except (json.JSONDecodeError, IndexError, KeyError):
         print(f"Parse error: {result.stdout}", file=sys.stderr)
         sys.exit(1)
+
+
+def show_sources(sources, BOLD, DIM, CYAN, GREEN, RESET):
+    print()
+    for i, src in enumerate(sources, 1):
+        title = src.get("title") or urlparse(src["url"]).netloc
+        print(f"  {CYAN}{BOLD}[{i}]{RESET} {title}")
+        print(f"      {DIM}{src['url']}{RESET}")
+    print()
+    while True:
+        choice = input(
+            f"{GREEN}▶{RESET} Open {CYAN}[1-{len(sources)}]{RESET} or {DIM}b{RESET}(ack): "
+        ).strip().lower()
+        if choice == "b":
+            print()
+            return
+        if choice.isdigit() and 1 <= int(choice) <= len(sources):
+            webbrowser.open(sources[int(choice) - 1]["url"])
 
 
 def main():
@@ -102,14 +151,21 @@ def main():
     cache_key = get_cache_key(prompt)
     cache = load_cache()
     from_cache = False
+    sources = []
 
     if not args.fresh and cache_key in cache:
-        cmds = cache[cache_key]
+        cached = cache[cache_key]
+        # migrate old list format
+        if isinstance(cached, list):
+            cmds, sources = cached, []
+        else:
+            cmds = cached.get("cmds", [])
+            sources = cached.get("sources", [])
         from_cache = True
     else:
-        cmds = fetch_commands(prompt, web=args.web)
+        cmds, sources = fetch_commands(prompt, web=args.web)
         if cmds:
-            cache[cache_key] = cmds
+            cache[cache_key] = {"cmds": cmds, "sources": sources}
             save_cache(cache)
 
     if not cmds:
@@ -128,10 +184,17 @@ def main():
         BOLD = DIM = CYAN = YELLOW = GREEN = RESET = ""
 
     cache_indicator = f" {DIM}(cached){RESET}" if from_cache else ""
+    web_indicator = f" {DIM}(web){RESET}" if sources else ""
     print(f"\n{DIM}─────────────────────────────{RESET}")
-    print(f"  {BOLD}Claude Command{RESET} {DIM}v1.1{RESET}{cache_indicator}")
-    print(f"{DIM}─────────────────────────────{RESET}\n")
+    print(f"  {BOLD}Claude Command{RESET} {DIM}v1.1{RESET}{web_indicator}{cache_indicator}")
+    print(f"{DIM}─────────────────────────────{RESET}")
 
+    if sources:
+        domains = [urlparse(s["url"]).netloc.removeprefix("www.") for s in sources]
+        unique_domains = list(dict.fromkeys(domains))
+        print(f"  {DIM}Sources: {', '.join(unique_domains)}{RESET}")
+
+    print()
     for i, opt in enumerate(cmds, 1):
         num = f"{CYAN}{BOLD}[{i}]{RESET}"
         label = f"{DIM}{opt['label']}{RESET}"
@@ -140,15 +203,24 @@ def main():
         print(f"      {cmd}")
         print()
 
-    choice = input(f"{GREEN}▶{RESET} Run {CYAN}[1-{len(cmds)}]{RESET} or {DIM}q{RESET}: ").strip().lower()
-    if choice == "q":
-        sys.exit(0)
-    if choice.isdigit() and 1 <= int(choice) <= len(cmds):
-        chosen_idx = int(choice)
-        cmd = cmds[chosen_idx - 1]["command"]
-        log_history(prompt, cmds, chosen_idx, cmd)
-        print(f"\n{DIM}${RESET} {BOLD}{cmd}{RESET}\n")
-        subprocess.run(cmd, shell=True)
+    source_hint = f", {DIM}s{RESET}(ources)" if sources else ""
+    while True:
+        choice = input(
+            f"{GREEN}▶{RESET} Run {CYAN}[1-{len(cmds)}]{RESET}{source_hint} or {DIM}q{RESET}: "
+        ).strip().lower()
+
+        if choice == "q":
+            sys.exit(0)
+        if choice == "s" and sources:
+            show_sources(sources, BOLD, DIM, CYAN, GREEN, RESET)
+            continue
+        if choice.isdigit() and 1 <= int(choice) <= len(cmds):
+            chosen_idx = int(choice)
+            cmd = cmds[chosen_idx - 1]["command"]
+            log_history(prompt, cmds, chosen_idx, cmd)
+            print(f"\n{DIM}${RESET} {BOLD}{cmd}{RESET}\n")
+            subprocess.run(cmd, shell=True)
+            break
 
 
 if __name__ == "__main__":
