@@ -92,7 +92,7 @@
 		{#if showOptions}
 			<pre class="options"><code>
 <span class="dim">─────────────────────────────</span>
-  <span class="bold">Claude Command</span> <span class="dim">v1.0</span>
+  <span class="bold">Claude Command</span> <span class="dim">v1.1</span>
 <span class="dim">─────────────────────────────</span>
 {#each example.options as opt, i}
 

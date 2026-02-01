@@ -61,13 +61,14 @@ def log_history(prompt: str, options: list, chosen: int, cmd: str) -> None:
         f.write(json.dumps(entry) + "\n")
 
 
-def fetch_commands(prompt: str) -> list:
+def fetch_commands(prompt: str, web: bool = False) -> list:
+    tools = "WebSearch" if web else ""
     result = subprocess.run(
         [
             "claude",
             "--model", "haiku",
             "-p",
-            "--tools", "",
+            "--tools", tools,
             "--output-format", "json",
             "--json-schema", SCHEMA,
             "--system-prompt", SYSTEM_PROMPT,
@@ -93,6 +94,7 @@ def fetch_commands(prompt: str) -> list:
 def main():
     parser = argparse.ArgumentParser(description="Convert natural language to shell commands")
     parser.add_argument("-f", "--fresh", action="store_true", help="Bypass cache")
+    parser.add_argument("-w", "--web", action="store_true", help="Allow web search for answers")
     parser.add_argument("prompt", nargs="+", help="Description of what you want to do")
     args = parser.parse_args()
 
@@ -105,7 +107,7 @@ def main():
         cmds = cache[cache_key]
         from_cache = True
     else:
-        cmds = fetch_commands(prompt)
+        cmds = fetch_commands(prompt, web=args.web)
         if cmds:
             cache[cache_key] = cmds
             save_cache(cache)
@@ -127,7 +129,7 @@ def main():
 
     cache_indicator = f" {DIM}(cached){RESET}" if from_cache else ""
     print(f"\n{DIM}─────────────────────────────{RESET}")
-    print(f"  {BOLD}Claude Command{RESET} {DIM}v1.0{RESET}{cache_indicator}")
+    print(f"  {BOLD}Claude Command{RESET} {DIM}v1.1{RESET}{cache_indicator}")
     print(f"{DIM}─────────────────────────────{RESET}\n")
 
     for i, opt in enumerate(cmds, 1):

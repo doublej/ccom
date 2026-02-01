@@ -19,6 +19,7 @@ ccom "list all files"
 ccom "find large videos"
 ccom "compress this folder"
 ccom -f "list files"  # bypass cache
+ccom -w "latest ffmpeg syntax"  # web search enabled
 ```
 
 ## Features
@@ -26,12 +27,13 @@ ccom -f "list files"  # bypass cache
 - **Caching**: Repeated prompts return instant cached results
 - **History**: All commands logged to `~/.ccom/history.jsonl`
 - **Fresh mode**: Use `-f` to bypass cache and get new suggestions
+- **Web search**: Use `-w` to let Claude search the web for answers
 
 ## Example
 
 ```
 ─────────────────────────────
-  Claude Command v1.0
+  Claude Command v1.1
 ─────────────────────────────
 
   [1] List files in current directory
