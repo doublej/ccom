@@ -16,7 +16,11 @@ CACHE_FILE = DATA_DIR / "cache.json"
 HISTORY_FILE = DATA_DIR / "history.jsonl"
 
 SYSTEM_PROMPT = "Generate 1-3 shell command options for macOS/zsh. Assume current directory."
-SYSTEM_PROMPT_WEB = "Search the web first, then generate 1-3 shell command options for macOS/zsh. Assume current directory."
+SYSTEM_PROMPT_WEB = (
+    "Search the web first, then generate 1-3 shell command options for macOS/zsh. "
+    "Assume current directory. Reply ONLY with JSON: "
+    '{"options": [{"label": "...", "command": "..."}]}'
+)
 
 SCHEMA = json.dumps({
     "type": "object",
@@ -66,30 +70,31 @@ def log_history(prompt: str, options: list, chosen: int, cmd: str) -> None:
 
 
 def extract_sources(messages: list) -> list:
-    sources = []
     seen = set()
+    sources = []
     for msg in messages:
-        if msg.get("role") != "user":
+        results = msg.get("tool_use_result", {})
+        if not isinstance(results, dict):
             continue
-        for block in msg.get("content", []):
-            if block.get("type") != "tool_result":
+        for item in results.get("results", []):
+            if not isinstance(item, dict):
                 continue
-            text = block.get("content", "")
-            if not isinstance(text, str):
-                continue
-            for match in re.findall(r'"url"\s*:\s*"([^"]+)"', text):
-                if match not in seen:
-                    seen.add(match)
-                    title_match = re.search(
-                        rf'"title"\s*:\s*"([^"]*)"[^}}]*"url"\s*:\s*"{re.escape(match)}"'
-                        rf'|"url"\s*:\s*"{re.escape(match)}"[^}}]*"title"\s*:\s*"([^"]*)"',
-                        text,
-                    )
-                    title = ""
-                    if title_match:
-                        title = title_match.group(1) or title_match.group(2) or ""
-                    sources.append({"title": title, "url": match})
+            for entry in item.get("content", []):
+                url = entry.get("url", "")
+                if url and url not in seen:
+                    seen.add(url)
+                    sources.append({"title": entry.get("title", ""), "url": url})
     return sources
+
+
+def parse_options_from_text(text: str) -> list:
+    match = re.search(r'\{[^{}]*"options"\s*:\s*\[.*?\]\s*\}', text, re.DOTALL)
+    if not match:
+        return []
+    try:
+        return json.loads(match.group(0)).get("options", [])
+    except (json.JSONDecodeError, AttributeError):
+        return []
 
 
 def fetch_commands(prompt: str, web: bool = False) -> tuple[list, list]:
@@ -98,13 +103,14 @@ def fetch_commands(prompt: str, web: bool = False) -> tuple[list, list]:
         "--model", "haiku",
         "-p",
         "--output-format", "json",
-        "--json-schema", SCHEMA,
         "--system-prompt", SYSTEM_PROMPT_WEB if web else SYSTEM_PROMPT,
         "--no-session-persistence",
         "--setting-sources", "",
     ]
     if web:
         cmd += ["--tools", "WebSearch", "--allowedTools", "WebSearch"]
+    else:
+        cmd += ["--json-schema", SCHEMA]
     cmd += ["--", prompt]
 
     result = subprocess.run(cmd, capture_output=True, text=True)
@@ -114,8 +120,18 @@ def fetch_commands(prompt: str, web: bool = False) -> tuple[list, list]:
 
     try:
         messages = json.loads(result.stdout)
-        options = messages[-1].get("structured_output", {}).get("options", [])
-        sources = extract_sources(messages) if web else []
+        if web:
+            # No json-schema with tools — parse JSON from text response
+            last_assistant = messages[-2].get("message", {})
+            text = ""
+            for block in last_assistant.get("content", []):
+                if block.get("type") == "text":
+                    text += block.get("text", "")
+            options = parse_options_from_text(text)
+            sources = extract_sources(messages)
+        else:
+            options = messages[-1].get("structured_output", {}).get("options", [])
+            sources = []
         return options, sources
     except (json.JSONDecodeError, IndexError, KeyError):
         print(f"Parse error: {result.stdout}", file=sys.stderr)
