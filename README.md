@@ -8,9 +8,10 @@ Convert natural language to shell commands using Claude AI.
 # Download
 curl -o /usr/local/bin/ccom https://raw.githubusercontent.com/jurrejan/ccom/main/ccom
 chmod +x /usr/local/bin/ccom
+pip install claude-agent-sdk
 ```
 
-Requires: `claude` CLI installed and authenticated.
+Requires: `claude` CLI installed and authenticated, `claude-agent-sdk` Python package.
 
 ## Usage
 
@@ -19,7 +20,8 @@ ccom "list all files"
 ccom "find large videos"
 ccom "compress this folder"
 ccom -f "list files"  # bypass cache
-ccom -w "latest ffmpeg syntax"  # web search enabled
+ccom -w "latest ffmpeg syntax"  # web search (CLI backend)
+ccom --cli "compress this folder"  # force CLI backend (no SDK)
 ```
 
 ## Features

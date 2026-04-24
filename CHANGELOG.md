@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.4
+
+- Default backend is now claude-agent-sdk (~37% faster cold fetches)
+- `--cli` flag to force claude CLI subprocess backend
+- `-w` / `--web` auto-routes to CLI backend (web search support)
+- Requires `pip install claude-agent-sdk` for default path
+
 ## v1.3
 
 - Run subprocess in temp cwd to stop CLAUDE.md walk-up discovery biasing output

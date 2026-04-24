@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 
 import argparse
+import asyncio
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
@@ -16,7 +18,10 @@ DATA_DIR = Path.home() / ".ccom"
 CACHE_FILE = DATA_DIR / "cache.json"
 HISTORY_FILE = DATA_DIR / "history.jsonl"
 
-SYSTEM_PROMPT = "Generate 1-3 shell command options for macOS/zsh. Assume current directory."
+SYSTEM_PROMPT = (
+    "Generate 1-3 shell command options for macOS/zsh. Assume current directory. "
+    'Reply ONLY with JSON: {"options": [{"label": "...", "command": "..."}]}'
+)
 SYSTEM_PROMPT_WEB = (
     "Search the web first, then generate 1-3 shell command options for macOS/zsh. "
     "Assume current directory. Reply ONLY with JSON: "
@@ -89,7 +94,7 @@ def extract_sources(messages: list) -> list:
 
 
 def parse_options_from_text(text: str) -> list:
-    match = re.search(r'\{[^{}]*"options"\s*:\s*\[.*?\]\s*\}', text, re.DOTALL)
+    match = re.search(r'\{.*?"options"\s*:\s*\[.*?\]\s*\}', text, re.DOTALL)
     if not match:
         return []
     try:
@@ -98,7 +103,7 @@ def parse_options_from_text(text: str) -> list:
         return []
 
 
-def fetch_commands(prompt: str, web: bool = False) -> tuple[list, list]:
+def fetch_via_cli(prompt: str, web: bool = False) -> tuple[list, list]:
     cmd = [
         "claude",
         "--model", "haiku",
@@ -123,21 +128,58 @@ def fetch_commands(prompt: str, web: bool = False) -> tuple[list, list]:
     try:
         messages = json.loads(result.stdout)
         if web:
-            # No json-schema with tools — parse JSON from text response
             last_assistant = messages[-2].get("message", {})
             text = ""
             for block in last_assistant.get("content", []):
                 if block.get("type") == "text":
                     text += block.get("text", "")
-            options = parse_options_from_text(text)
-            sources = extract_sources(messages)
-        else:
-            options = messages[-1].get("structured_output", {}).get("options", [])
-            sources = []
-        return options, sources
+            return parse_options_from_text(text), extract_sources(messages)
+        return messages[-1].get("structured_output", {}).get("options", []), []
     except (json.JSONDecodeError, IndexError, KeyError):
         print(f"Parse error: {result.stdout}", file=sys.stderr)
         sys.exit(1)
+
+
+async def _fetch_via_sdk_async(prompt: str) -> list:
+    os.environ.pop("CLAUDECODE", None)
+    os.environ.pop("CLAUDE_CODE_ENTRYPOINT", None)
+    from claude_agent_sdk import (
+        AssistantMessage,
+        ClaudeAgentOptions,
+        ResultMessage,
+        TextBlock,
+        query,
+    )
+
+    with tempfile.TemporaryDirectory() as neutral_cwd:
+        options = ClaudeAgentOptions(
+            cwd=neutral_cwd,
+            system_prompt=SYSTEM_PROMPT,
+            model="haiku",
+            allowed_tools=[],
+            setting_sources=[],
+            max_turns=1,
+        )
+        text = ""
+        async for message in query(prompt=prompt, options=options):
+            if isinstance(message, AssistantMessage):
+                for block in message.content:
+                    if isinstance(block, TextBlock):
+                        text += block.text
+            elif isinstance(message, ResultMessage):
+                if message.result:
+                    text = message.result
+        return parse_options_from_text(text)
+
+
+def fetch_via_sdk(prompt: str) -> tuple[list, list]:
+    return asyncio.run(_fetch_via_sdk_async(prompt)), []
+
+
+def fetch_commands(prompt: str, web: bool = False, cli: bool = False) -> tuple[list, list]:
+    if web or cli:
+        return fetch_via_cli(prompt, web=web)
+    return fetch_via_sdk(prompt)
 
 
 def show_sources(sources, BOLD, DIM, CYAN, GREEN, RESET):
@@ -161,7 +203,8 @@ def show_sources(sources, BOLD, DIM, CYAN, GREEN, RESET):
 def main():
     parser = argparse.ArgumentParser(description="Convert natural language to shell commands")
     parser.add_argument("-f", "--fresh", action="store_true", help="Bypass cache")
-    parser.add_argument("-w", "--web", action="store_true", help="Allow web search for answers")
+    parser.add_argument("-w", "--web", action="store_true", help="Allow web search for answers (uses CLI backend)")
+    parser.add_argument("--cli", action="store_true", help="Use claude CLI subprocess instead of SDK")
     parser.add_argument("prompt", nargs="+", help="Description of what you want to do")
     args = parser.parse_args()
 
@@ -173,7 +216,6 @@ def main():
 
     if not args.fresh and cache_key in cache:
         cached = cache[cache_key]
-        # migrate old list format
         if isinstance(cached, list):
             cmds, sources = cached, []
         else:
@@ -181,7 +223,7 @@ def main():
             sources = cached.get("sources", [])
         from_cache = True
     else:
-        cmds, sources = fetch_commands(prompt, web=args.web)
+        cmds, sources = fetch_commands(prompt, web=args.web, cli=args.cli)
         if cmds:
             cache[cache_key] = {"cmds": cmds, "sources": sources}
             save_cache(cache)
@@ -190,7 +232,6 @@ def main():
         print("No commands generated", file=sys.stderr)
         sys.exit(1)
 
-    # ANSI codes (only if TTY)
     if sys.stdout.isatty():
         BOLD = "\033[1m"
         DIM = "\033[2m"
@@ -204,7 +245,7 @@ def main():
     cache_indicator = f" {DIM}(cached){RESET}" if from_cache else ""
     web_indicator = f" {DIM}(web){RESET}" if sources else ""
     print(f"\n{DIM}─────────────────────────────{RESET}")
-    print(f"  {BOLD}Claude Command{RESET} {DIM}v1.3{RESET}{web_indicator}{cache_indicator}")
+    print(f"  {BOLD}Claude Command{RESET} {DIM}v1.4{RESET}{web_indicator}{cache_indicator}")
     print(f"{DIM}─────────────────────────────{RESET}")
 
     if sources:
