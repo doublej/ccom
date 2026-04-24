@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.3
+
+- Run subprocess in temp cwd to stop CLAUDE.md walk-up discovery biasing output
+- Clean exit on Ctrl+C / EOF (no Python traceback, exit code 130)
+
 ## v1.2
 
 - Show web search sources in TUI when `-w` is used

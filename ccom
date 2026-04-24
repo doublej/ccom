@@ -6,6 +6,7 @@ import json
 import re
 import subprocess
 import sys
+import tempfile
 import time
 import webbrowser
 from pathlib import Path
@@ -113,7 +114,8 @@ def fetch_commands(prompt: str, web: bool = False) -> tuple[list, list]:
         cmd += ["--json-schema", SCHEMA]
     cmd += ["--", prompt]
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    with tempfile.TemporaryDirectory() as neutral_cwd:
+        result = subprocess.run(cmd, capture_output=True, text=True, cwd=neutral_cwd)
     if result.returncode != 0:
         print(f"Error: {result.stderr}", file=sys.stderr)
         sys.exit(1)
@@ -202,7 +204,7 @@ def main():
     cache_indicator = f" {DIM}(cached){RESET}" if from_cache else ""
     web_indicator = f" {DIM}(web){RESET}" if sources else ""
     print(f"\n{DIM}─────────────────────────────{RESET}")
-    print(f"  {BOLD}Claude Command{RESET} {DIM}v1.1{RESET}{web_indicator}{cache_indicator}")
+    print(f"  {BOLD}Claude Command{RESET} {DIM}v1.3{RESET}{web_indicator}{cache_indicator}")
     print(f"{DIM}─────────────────────────────{RESET}")
 
     if sources:
@@ -240,4 +242,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (KeyboardInterrupt, EOFError):
+        print()
+        sys.exit(130)
