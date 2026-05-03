@@ -277,6 +277,8 @@ def main():
             chosen_idx = int(choice)
             cmd = cmds[chosen_idx - 1]["command"]
             log_history(prompt, cmds, chosen_idx, cmd)
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
+            (DATA_DIR / "last_cmd").write_text(cmd)
             print(f"\n{DIM}${RESET} {BOLD}{cmd}{RESET}\n")
             subprocess.run(cmd, shell=True)
             break

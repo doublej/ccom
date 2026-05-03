@@ -11,6 +11,16 @@ chmod +x /usr/local/bin/ccom
 pip install claude-agent-sdk
 ```
 
+To add chosen commands to your shell history, add this to your `.zshrc`:
+
+```zsh
+ccom() {
+  command ccom "$@"
+  local f=~/.ccom/last_cmd
+  [[ -f "$f" ]] && print -s -- "$(cat "$f")" && rm -f "$f"
+}
+```
+
 Requires: `claude` CLI installed and authenticated, `claude-agent-sdk` Python package.
 
 ## Usage
